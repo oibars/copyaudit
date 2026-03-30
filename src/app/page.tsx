@@ -14,6 +14,7 @@ export default function HomePage() {
   const [url, setUrl] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isProLoading, setIsProLoading] = useState(false)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,6 +41,26 @@ export default function HomePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
       setIsLoading(false)
+    }
+  }
+
+  const handleProCheckout = async () => {
+    setIsProLoading(true)
+    try {
+      const response = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceId: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID }),
+      })
+      const data = await response.json()
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        throw new Error(data.error || 'Failed to start checkout')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start checkout')
+      setIsProLoading(false)
     }
   }
 
@@ -270,15 +291,17 @@ export default function HomePage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-violet-600 border-2">
+              <Card className="border-violet-600 border-2 relative overflow-hidden">
+                <div className="absolute top-0 right-0 bg-violet-600 text-white text-xs font-medium px-3 py-1 rounded-bl-lg">
+                  Popular
+                </div>
                 <CardHeader>
-                  <Badge className="w-fit mb-2">Recommended</Badge>
                   <CardTitle>Pro</CardTitle>
                   <CardDescription>For serious SaaS teams</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-bold mb-4">$19<span className="text-lg font-normal text-muted-foreground">/mo</span></div>
-                  <ul className="space-y-2 text-sm">
+                  <div className="text-4xl font-bold mb-4">$29<span className="text-lg font-normal text-muted-foreground">/mo</span></div>
+                  <ul className="space-y-2 text-sm mb-6">
                     <li className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
                       Unlimited audits
@@ -289,17 +312,31 @@ export default function HomePage() {
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      Audit history
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      Compare versions
+                      Frontier AI models
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
                       Priority processing
                     </li>
                   </ul>
+                  <Button 
+                    className="w-full" 
+                    variant="default"
+                    onClick={handleProCheckout}
+                    disabled={isProLoading}
+                  >
+                    {isProLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Redirecting...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Get Pro
+                      </>
+                    )}
+                  </Button>
                 </CardContent>
               </Card>
             </div>
