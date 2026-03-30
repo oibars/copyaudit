@@ -1,4 +1,4 @@
-import { type CopyAnalysis } from './copy-analyzer'
+import type { CopyAnalysis } from '@/lib/copy-analyzer'
 
 export interface Audit {
   id: string

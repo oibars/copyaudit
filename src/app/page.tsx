@@ -80,7 +80,7 @@ export default function HomePage() {
             </h1>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
               Paste your URL and get an AI-powered audit against 6 master copywriting frameworks.
-              Know exactly what's wrong and how to fix it.
+              Know exactly what&apos;s wrong and how to fix it.
             </p>
 
             <Card className="max-w-xl mx-auto">

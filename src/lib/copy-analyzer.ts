@@ -1,8 +1,13 @@
 import OpenAI from 'openai'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function getOpenAIClient(): OpenAI {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY environment variable is not set')
+  }
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
 export interface CopyAnalysis {
   overallScore: number
@@ -91,6 +96,7 @@ FULL PAGE TEXT (first 5000 chars):
 ${content.text.slice(0, 5000)}
 `
 
+  const openai = getOpenAIClient()
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
