@@ -64,12 +64,12 @@ IMPORTANT: Return ONLY the JSON. No markdown, no explanation, no text before or 
 
 const MODEL_CONFIG = {
   free: {
-    model: 'o3-mini',
-    reason: 'Cost-effective for structured analysis',
+    model: 'o4-mini',
+    reason: 'Cost-effective reasoning model for structured analysis',
   },
   pro: {
-    model: 'gpt-4o',
-    reason: 'Frontier model for nuanced analysis',
+    model: 'o3',
+    reason: 'Frontier reasoning model for nuanced analysis',
   },
 } as const
 
