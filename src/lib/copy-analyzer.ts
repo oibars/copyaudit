@@ -9,6 +9,8 @@ function getOpenAIClient(): OpenAI {
   })
 }
 
+export type ModelTier = 'free' | 'pro'
+
 export interface CopyAnalysis {
   overallScore: number
   dimensions: {
@@ -20,6 +22,7 @@ export interface CopyAnalysis {
   }
   top3Fixes: { priority: number; issue: string; suggestion: string }[]
   copyGold: { section: string; why: string }
+  modelUsed: string
 }
 
 const SYSTEM_PROMPT = `You are an expert B2B SaaS copywriter trained in these master frameworks:
@@ -59,19 +62,33 @@ Return ONLY valid JSON matching this exact structure:
 
 IMPORTANT: Return ONLY the JSON. No markdown, no explanation, no text before or after.`
 
-export async function analyzeCopy(content: {
-  title: string
-  description: string
-  h1: string
-  text: string
-  sections: {
-    hero: string
-    features: string
-    pricing: string
-    testimonials: string
-    cta: string
-  }
-}): Promise<CopyAnalysis> {
+const MODEL_CONFIG = {
+  free: {
+    model: 'o3-mini',
+    reason: 'Cost-effective for structured analysis',
+  },
+  pro: {
+    model: 'gpt-4o',
+    reason: 'Frontier model for nuanced analysis',
+  },
+} as const
+
+export async function analyzeCopy(
+  content: {
+    title: string
+    description: string
+    h1: string
+    text: string
+    sections: {
+      hero: string
+      features: string
+      pricing: string
+      testimonials: string
+      cta: string
+    }
+  },
+  tier: ModelTier = 'free'
+): Promise<CopyAnalysis> {
   const copyToAnalyze = `
 TITLE: ${content.title}
 META DESCRIPTION: ${content.description}
@@ -97,8 +114,10 @@ ${content.text.slice(0, 5000)}
 `
 
   const openai = getOpenAIClient()
+  const config = MODEL_CONFIG[tier]
+
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: config.model,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `Analyze this B2B SaaS landing page copy:\n\n${copyToAnalyze}` },
@@ -115,7 +134,7 @@ ${content.text.slice(0, 5000)}
 
   try {
     const parsed = JSON.parse(result) as CopyAnalysis
-    return parsed
+    return { ...parsed, modelUsed: config.model }
   } catch {
     throw new Error('Failed to parse AI response as JSON')
   }

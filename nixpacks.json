@@ -1,0 +1,10 @@
+{
+  "name": "copyaudit",
+  "version": "2024-11-11",
+  "build": {
+    "aptPackages": ["curl"]
+  },
+  "phase": {
+    "nixpacks": ["nodejs-22", "npm"]
+  }
+}
