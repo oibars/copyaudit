@@ -6,6 +6,8 @@ function getOpenAIClient(): OpenAI {
   }
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1',
+    dangerouslyAllowBrowser: true,
   })
 }
 
@@ -64,12 +66,12 @@ IMPORTANT: Return ONLY the JSON. No markdown, no explanation, no text before or 
 
 const MODEL_CONFIG = {
   free: {
-    model: 'o4-mini',
-    reason: 'Cost-effective reasoning model for structured analysis',
+    model: 'google/gemini-3.1-flash-lite-preview',
+    reason: 'Fast, cost-effective for structured analysis',
   },
   pro: {
-    model: 'o3',
-    reason: 'Frontier reasoning model for nuanced analysis',
+    model: 'anthropic/claude-3.5-sonnet',
+    reason: 'Best for nuanced copywriting analysis',
   },
 } as const
 
@@ -129,7 +131,7 @@ ${content.text.slice(0, 5000)}
   const result = response.choices[0]?.message?.content?.trim()
 
   if (!result) {
-    throw new Error('Failed to get analysis from OpenAI')
+    throw new Error('Failed to get analysis from AI')
   }
 
   try {
