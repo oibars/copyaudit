@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
         const subscriptionId = session.subscription as string
 
         if (userId && subscriptionId) {
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId)
+          const subscription: any = await stripe.subscriptions.retrieve(subscriptionId)
           
           await prisma.subscription.upsert({
             where: { userId },
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       }
 
       case 'customer.subscription.updated': {
-        const subscription = event.data.object as Stripe.Subscription
+        const subscription: any = event.data.object as Stripe.Subscription
         const userId = subscription.metadata?.userId
 
         if (userId) {
