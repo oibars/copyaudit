@@ -1,0 +1,212 @@
+name: Claude CI Healer
+
+# Self-healing CI: on failure, Claude reads the logs, proposes a minimal fix, and opens a PR.
+# Requires repo secret: CLAUDE_CODE_OAUTH_TOKEN (generate via `claude setup-token` — uses your Max plan credits, not API billing)
+#
+# Triggers:
+#   - workflow_dispatch: run manually from the Actions tab (safe default)
+#   - workflow_run: uncomment the block below to auto-heal on CI failure
+#     (adjust `workflows:` to your repo's actual CI workflow names)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "GitHub Actions run ID to diagnose (blank = latest failed run on default branch)"
+        required: false
+        type: string
+  # workflow_run:
+  #   workflows: ["CI", "Build", "Test"]
+  #   types: [completed]
+  #   branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: claude-healer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  heal:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Guard — require CLAUDE_CODE_OAUTH_TOKEN
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN repo secret is not set. Generate one locally with \`claude setup-token\` and add it under Settings → Secrets → Actions."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Resolve target run ID
+        id: run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EVENT_RUN_ID:-}" ]; then
+            RUN_ID="$EVENT_RUN_ID"
+          elif [ -n "${INPUT_RUN_ID:-}" ]; then
+            RUN_ID="$INPUT_RUN_ID"
+          else
+            RUN_ID=$(gh run list --branch "$DEFAULT_BRANCH" --status failure --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "::notice::No failed runs found — nothing to heal."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch failed run logs
+        if: steps.run.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .claude-healer
+          gh run view "$RUN_ID" --log-failed > .claude-healer/failed.log 2>&1 || true
+          gh run view "$RUN_ID" --json conclusion,displayTitle,headBranch,headSha,name,workflowName \
+            > .claude-healer/meta.json
+          head -c 200000 .claude-healer/failed.log > .claude-healer/failed-trimmed.log
+          echo "Log size: $(wc -c < .claude-healer/failed-trimmed.log) bytes"
+
+      - name: Dedup — skip if healer PR already open for this run
+        if: steps.run.outputs.skip != '1'
+        id: dedup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          BRANCH="claude-healer/run-${RUN_ID}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
+          if [ "$EXISTING" != "0" ]; then
+            echo "::notice::PR already open for $BRANCH — skipping."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Claude to propose a fix
+        if: steps.run.outputs.skip != '1' && steps.dedup.outputs.skip != '1'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          PROMPT=$(cat <<'EOF'
+          You are a CI repair agent. A GitHub Actions run failed. Your job:
+
+          1. Read .claude-healer/failed-trimmed.log and .claude-healer/meta.json.
+          2. Classify the failure: syntax | dependency | test | type | lint | infra | flaky | unclear.
+          3. Trace the root cause in the repo source. Do NOT guess.
+          4. Make the MINIMAL code change that fixes the failure. No refactors, no "while I'm here" changes.
+          5. If the failure is flaky, infra-related, or needs a secret you don't have, DO NOT edit code — write your diagnosis to .claude-healer/diagnosis.md and stop.
+          6. If you fix something, run the relevant local check (lint, typecheck, or targeted test) to verify.
+          7. Write a one-paragraph summary of what you changed and why to .claude-healer/summary.md.
+
+          Constraints:
+          - Do not modify .github/workflows/claude-ci-healer.yml.
+          - Do not commit secrets or .env files.
+          - Do not regenerate snapshot / visual fixtures.
+          - Do not upgrade major dependency versions.
+          - Touch only files directly implicated by the failure.
+          EOF
+          )
+          claude -p "$PROMPT" \
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(npm:*,pnpm:*,bun:*,yarn:*,npx:*,pnpx:*,node:*,tsc:*,eslint:*,ruff:*,mypy:*,pytest:*,python:*,go:*,cargo:*,dart:*,flutter:*,git:diff*,git:status*,git:log*,cat,ls,grep,find,head,tail,wc)" \
+            --permission-mode acceptEdits \
+            --output-format text \
+            > .claude-healer/claude-output.log 2>&1 || {
+              echo "::warning::Claude exited non-zero — see .claude-healer/claude-output.log"
+            }
+          tail -c 20000 .claude-healer/claude-output.log || true
+
+      - name: Detect changes
+        if: steps.run.outputs.skip != '1' && steps.dedup.outputs.skip != '1'
+        id: changes
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- . ':!.claude-healer'; then
+            echo "has_changes=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open fix PR
+        if: steps.changes.outputs.has_changes == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.dedup.outputs.branch }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "claude-healer[bot]"
+          git config user.email "claude-healer@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git reset -- .claude-healer || true
+          SUMMARY="(no summary produced)"
+          if [ -f .claude-healer/summary.md ]; then
+            SUMMARY=$(cat .claude-healer/summary.md)
+          fi
+          git commit -m "fix(ci): auto-heal failing run ${RUN_ID}" \
+                     -m "$SUMMARY" \
+                     -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+          git push -u origin "$BRANCH"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}"
+          {
+            echo "Automated fix proposed by Claude CI Healer for failing run [#${RUN_ID}](${RUN_URL})."
+            echo
+            echo "## Summary"
+            echo "${SUMMARY}"
+            echo
+            echo "## Review checklist"
+            echo "- [ ] Diff is minimal and scoped to the failure"
+            echo "- [ ] No secrets / .env changes"
+            echo "- [ ] No unrelated refactors"
+            echo "- [ ] CI passes on this PR before merging"
+            echo
+            echo "_Opened by .github/workflows/claude-ci-healer.yml_"
+          } > .claude-healer/pr-body.md
+          gh pr create \
+            --title "fix(ci): auto-heal failing run ${RUN_ID}" \
+            --body-file .claude-healer/pr-body.md \
+            --label "automated" 2>/dev/null || \
+          gh pr create \
+            --title "fix(ci): auto-heal failing run ${RUN_ID}" \
+            --body-file .claude-healer/pr-body.md
+
+      - name: Upload diagnosis artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-healer-${{ steps.run.outputs.run_id || github.run_id }}
+          path: .claude-healer/
+          if-no-files-found: ignore
+          retention-days: 14
