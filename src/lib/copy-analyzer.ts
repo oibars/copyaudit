@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { getExtractionLimitations, parsePersuasion, PERSUASION_GUIDANCE, type PersuasionDiagnosis } from './persuasion'
 
 function getOpenAIClient(): OpenAI {
   if (!process.env.OPENAI_API_KEY) {
@@ -25,6 +26,7 @@ export interface CopyAnalysis {
   top3Fixes: { priority: number; issue: string; suggestion: string }[]
   copyGold: { section: string; why: string }
   modelUsed: string
+  persuasion?: PersuasionDiagnosis
 }
 
 const SYSTEM_PROMPT = `You are an expert B2B SaaS copywriter trained in these master frameworks:
@@ -113,6 +115,9 @@ ${content.sections.cta}
 
 FULL PAGE TEXT (first 5000 chars):
 ${content.text.slice(0, 5000)}
+
+EXTRACTION LIMITATIONS:
+${getExtractionLimitations(content).join('\n')}
 `
 
   const openai = getOpenAIClient()
@@ -121,11 +126,11 @@ ${content.text.slice(0, 5000)}
   const response = await openai.chat.completions.create({
     model: config.model,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${PERSUASION_GUIDANCE}` },
       { role: 'user', content: `Analyze this B2B SaaS landing page copy:\n\n${copyToAnalyze}` },
     ],
     temperature: 0.3,
-    max_tokens: 2000,
+    max_tokens: 3000,
   })
 
   const result = response.choices[0]?.message?.content?.trim()
@@ -136,7 +141,9 @@ ${content.text.slice(0, 5000)}
 
   try {
     const parsed = JSON.parse(result) as CopyAnalysis
-    return { ...parsed, modelUsed: config.model }
+    const { persuasion: rawPersuasion, ...analysis } = parsed
+    const persuasion = parsePersuasion(rawPersuasion, content)
+    return { ...analysis, modelUsed: config.model, ...(persuasion ? { persuasion } : {}) }
   } catch {
     throw new Error('Failed to parse AI response as JSON')
   }

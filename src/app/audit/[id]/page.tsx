@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress'
 import { Loader2, ArrowLeft, Sparkles, ExternalLink, Copy, Check } from 'lucide-react'
 import { cn, getScoreColor, getScoreBgColor, getScoreLabel, truncateUrl } from '@/lib/utils'
 import type { CopyAnalysis } from '@/lib/copy-analyzer'
+import { PersuasionDiagnosisCard } from '@/components/persuasion-diagnosis'
 
 interface AuditResult {
   id: string
@@ -196,6 +197,8 @@ export default function AuditResultPage() {
                 </Card>
               ))}
             </div>
+
+            <PersuasionDiagnosisCard diagnosis={audit.analysis.persuasion} />
 
             <Card>
               <CardHeader>
