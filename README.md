@@ -9,6 +9,9 @@ AI-powered landing page copy auditor for B2B SaaS. Paste your URL, get scored fe
 - **Line-by-Line Feedback**: Specific examples from your copy
 - **Top 3 Recommendations**: Prioritized improvements
 - **Copy Gold**: Your best performing section identified
+- **Persuasion Structure**: Optional, evidence-linked qualitative guidance with
+  a feature-to-benefit check and explicit extraction limits. It does not add a
+  score or require a template. [Method and source](docs/persuasion-diagnostics.md)
 
 ## Tech Stack
 
